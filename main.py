@@ -67,11 +67,14 @@ def main():
     parser.add_argument("-s", "--stack-size-to-print", dest="stacksize",
                         type=int, help="Number of addresses of the stack to print", metavar="SIZE", default=24)
     parser.add_argument("corefile")
-    parser.add_argument("elffile")
+    parser.add_argument("elffile", nargs='?', default=None)
     args = parser.parse_args()
     stackSize = args.stacksize
 
-    elf = ElfParser(args.elffile)
+    if args.elffile:
+        elf = ElfParser(args.elffile)
+    else:
+        elf = None
     core = CoreParser(args.corefile)
     # iprint("=== MODULES ===")
     # with indent():
