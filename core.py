@@ -5,59 +5,125 @@ from elftools.elf.elffile import ELFFile
 from sys import argv
 from collections import defaultdict
 
-from util import u16, u32, c_str, hexdump
 from indent import indent, iprint
 
+from construct import *
 
-class VitaThread():
+ThreadInfoCommon = Struct(
+        "uid" / Hex(Int32ul),
+        "name" / PaddedString(32, "utf8"),
+        "init_attrs" / Hex(Int32ul),
+        "current_attrs" / Hex(Int32ul),
+        "status" / Hex(Int32ul),
+        "entry_address" / Hex(Int32ul),
+        "stack_addr_top" / Hex(Int32ul),
+        "stack_size" / Hex(Int32ul),
+        Int32ul,
+        "arg_size" / Int32ul,
+        "arg_blk_addr" / Hex(Int32ul),
+        "init_prio" / Int32ul,
+        "current_prio" / Int32ul,
+        "init_cpu_aff_mask" / Hex(Int32ul),
+        "current_cpu_aff_mask" / Hex(Int32ul),
+        "last_cpuid" / Int32ul,
+        "wait_state_type" / Int32ul,
+        "wait_target_id" / Hex(Int32ul),
+        "clock_run" / Int64ul,
+        Int32ul,
+        "stop_reason" / Hex(Int32ul),
+        Array(3, Int32ul),
+        "exit_status" / Hex(Int32ul),
+        "interrupt_preempt_count" / Int32ul,
+        "thread_preempt_count" / Int32ul,
+        "release_count" / Int32ul,
+        "change_cpu_count" / Int32ul,
+        "vfp_mode" / Int32ul,
+        "pc" / Hex(Int32ul),
+        "wait_timeout" / Int32ul)
 
-    def __init__(self, data):
-        self.uid = u32(data, 4)
-        self.name = c_str(data, 8)
-        self.stop_reason = u32(data, 0x74)
-        self.status = u16(data, 0x30)
-        self.pc = u32(data, 0x9C)
+ThreadInfo1 = Int32ul + ThreadInfoCommon + Struct(
+        "ukn" / Int64ul,
+        "wait_details" / Computed(lambda _: (0,)*9))
+assert(ThreadInfo1.sizeof() == 0xAC)
 
-    def __str__(self):
-        return "{} <0x{:x}>".format(self.name, self.uid)
+ThreadInfo9 = Int32ul + ThreadInfoCommon + Struct(
+        "wait_details" / Int32ul[8])
+assert(ThreadInfo9.sizeof() == 0xC4)
 
+ThreadInfo18 = Prefixed(Int32ul, includelength=True,
+        subcon=ThreadInfoCommon + Struct(
+        "wait_details" / Int32ul[9]))
 
-class VitaModuleSegment():
+ThreadsInfo = Struct(
+        "version" / Int32ul,
+        "items" / PrefixedArray(Int32ul, Switch(this._.version, {
+             1: ThreadInfo1,
+             9: ThreadInfo9,
+            18: ThreadInfo18
+        })))
 
-    def __init__(self, data, num):
-        self.num = num
-        self.attr = u32(data, 4)
-        self.start = u32(data, 8)
-        self.size = u32(data, 12)
-        self.align = u32(data, 16)
+ThreadRegInfoCommon = Struct(
+        "tid" / Hex(Int32ul),
+        "gpr" / Hex(Int32ul)[16],
+        "cpsr" / Hex(Int32ul),
+        "fpscr" / Hex(Int32ul),
+        "tpidruro" / Hex(Int32ul),
+        "neon" / Hex(BytesInteger(16, swapped=True))[16]
+)
+ThreadRegInfo1 = Struct(Int32ul) + ThreadRegInfoCommon
+assert(ThreadRegInfo1.sizeof() == 0x154)
+ThreadRegInfo17 = Struct("size" / Const(0x178, Int32ul)) + ThreadRegInfoCommon + Struct(
+        "fpexc" / Hex(Int32ul),
+        "tpidrurw" / Hex(Int32ul),
+        "cpacr" / Hex(Int32ul),
+        "dacr" / Hex(Int32ul),
+        "dbgdscr" / Hex(Int32ul),
+        "ifsr" / Hex(Int32ul),
+        "ifar" / Hex(Int32ul),
+        "dfsr" / Hex(Int32ul),
+        "dfar" / Hex(Int32ul))
+assert(ThreadRegInfo17.sizeof() == 0x178)
 
+ThreadRegsInfo = Struct(
+        "version" / Int32ul,
+        "items" / PrefixedArray(Int32ul, Switch(this._.version, {
+             1: ThreadRegInfo1,
+            17: ThreadRegInfo17
+        })))
 
-class VitaModule():
+SegmentInfo = Struct(
+        "num" / Computed(this._index),
+        Int32ul,
+        "attr" / Hex(Int32ul),
+        "start" / Hex(Int32ul),
+        "size" / Hex(Int32ul),
+        "align" / Hex(Int32ul))
 
-    def __init__(self, data):
-        self.uid = u32(data, 4)
-        self.num_segs = u32(data, 0x4C)
-        self.name = c_str(data, 0x24)
+ModuleInfo = Struct(
+        Int32ul,
+        "uid" / Hex(Int32ul),
+        "sdk_version" / Hex(Int32ul),
+        "module_version" / Hex(Int16ul),
+        Int16ul,
+        "type" / Int8ul,
+        Int8ul,
+        "flags" / Hex(Int16ul),
+        "start_entry_addr" / Hex(Int32ul),
+        "reference_count" / Int32ul,
+        "stop_entry_addr" / Hex(Int32ul),
+        "exit_entry_addr" / Hex(Int32ul),
+        "name" / PaddedString(32, "utf8"),
+        "status" / Hex(Int32ul),
+        "ukn" / Hex(Int32ul),
+        "segments" / PrefixedArray(Int32ul, SegmentInfo),
+        "start_exidx" / Hex(Int32ul),
+        "end_exidx" / Hex(Int32ul),
+        "start_extab" / Hex(Int32ul),
+        "end_extab" / Hex(Int32ul))
 
-    def parse_segs(self, data):
-        self.segments = []
-        for x in range(self.num_segs):
-            sz = 0x14
-            self.segments.append(VitaModuleSegment(data[sz*x:sz*(x+1)], x + 1))
-
-    def parse_foot(self, data):
-        # arm exception start/end
-        pass
-
-
-class VitaRegs():
-
-    def __init__(self, data):
-        self.tid = u32(data, 4)
-
-        self.gpr = []
-        for x in range(16):
-            self.gpr.append(u32(data, 8 + 4 * x))
+ModulesInfo = Struct(
+        "version" / Const(1, Int32ul),
+        "items" / PrefixedArray(Int32ul, ModuleInfo))
 
 
 class VitaAddress():
@@ -119,7 +185,7 @@ class CoreParser():
             f.close()
             f = open(filename, "rb")
             self.elf = ELFFile(f)
-        
+
         self.init_notes()
 
         self.parse_modules()
@@ -139,52 +205,28 @@ class CoreParser():
             elif seg.header.p_type == "PT_LOAD":
                 self.segments.append(Segment(seg.header.p_vaddr, seg.data()))
 
+
     def parse_modules(self):
-        self.modules = []
-
         data = self.notes["MODULE_INFO"]
-        num = u32(data, 4)
-        off = 8
-        for x in range(num):
-            # module head
-            sz = 0x50
-            module = VitaModule(data[off:off+sz])
-            off += sz
-            # module segs
-            sz = module.num_segs * 0x14
-            module.parse_segs(data[off:off+sz])
-            off += sz
-            # module foot
-            sz = 0x10
-            module.parse_foot(data[off:off+sz])
-            off += sz
 
-            self.modules.append(module)
+        modules = ModulesInfo.parse(data)
+        self.modules = modules['items']
 
     def parse_threads(self):
-        self.threads = []
-        self.tid_to_thread = dict()
-
         data = self.notes["THREAD_INFO"]
-        num = u32(data, 4)
-        off = 8
-        for x in range(num):
-            sz = u32(data, off)
-            thread = VitaThread(data[off:off+sz])
-            self.threads.append(thread)
+        threads = ThreadsInfo.parse(data)
+
+        self.tid_to_thread = dict()
+        self.threads = threads['items']
+        for thread in self.threads:
             self.tid_to_thread[thread.uid] = thread
-            off += sz
 
     def parse_thread_regs(self):
         data = self.notes["THREAD_REG_INFO"]
-        num = u32(data, 4)
-        off = 8
-        for x in range(num):
-            sz = u32(data, off)
-            regs = VitaRegs(data[off:off+sz])
-            # assign registers to the thread they belong to
+        thdregs = ThreadRegsInfo.parse(data)
+
+        for regs in thdregs['items']:
             self.tid_to_thread[regs.tid].regs = regs
-            off += sz
 
     def get_address_notation(self, symbol, vaddr):
         for module in self.modules:

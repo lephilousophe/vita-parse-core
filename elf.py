@@ -5,7 +5,6 @@ from sys import argv
 from collections import defaultdict
 import subprocess
 
-from util import u16, u32, c_str, hexdump
 from indent import indent, iprint
 
 

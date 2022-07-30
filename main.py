@@ -3,7 +3,8 @@ from elftools.elf.elffile import ELFFile
 from collections import defaultdict
 from argparse import ArgumentParser
 
-from util import u16, u32, c_str, hexdump
+from construct import Int32ul
+
 from indent import indent, iprint
 from elf import ElfParser
 from core import CoreParser
@@ -116,7 +117,7 @@ def main():
                 addr = 4 * x + sp
                 data = core.read_vaddr(addr, 4)
                 if data:
-                    data = u32(data, 0)
+                    data = Int32ul.parse(data)
                     prefix = "     "
                     if addr == sp:
                         prefix = "SP =>"
