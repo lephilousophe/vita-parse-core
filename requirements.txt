@@ -1,1 +1,1 @@
-pyelftools==0.24
+pyelftools==0.28
